@@ -5274,7 +5274,33 @@ function meowCTCellPopup(opts) {
 
   // ★ 插入到模态窗口内部（避免 backdrop-filter 创建的 stacking context 遮挡）
   var modalHost = doc.getElementById('meow-summary-modal') || doc.getElementById('meow-diary-modal') || doc.body;
+
+  // ★ 保存所有可滚动父级的滚动位置（插入 overlay 和 focus 都会触发回弹）
+  var _savedScrollers = [];
+  try {
+    var _p = modalHost;
+    while (_p) {
+      if (_p.scrollTop > 0 || _p.scrollLeft > 0) {
+        _savedScrollers.push({ el: _p, top: _p.scrollTop, left: _p.scrollLeft });
+      }
+      _p = _p.parentElement;
+    }
+    // 也保存 modalHost 内部的可滚动子容器
+    var _inner = modalHost.querySelector('.meow-modal-body') || modalHost.querySelector('[style*="overflow"]');
+    if (_inner && (_inner.scrollTop > 0 || _inner.scrollLeft > 0)) {
+      _savedScrollers.push({ el: _inner, top: _inner.scrollTop, left: _inner.scrollLeft });
+    }
+  } catch(e){}
+
   modalHost.appendChild(overlay);
+
+  // ★ 立即还原滚动位置
+  try {
+    for (var _si = 0; _si < _savedScrollers.length; _si++) {
+      _savedScrollers[_si].el.scrollTop = _savedScrollers[_si].top;
+      _savedScrollers[_si].el.scrollLeft = _savedScrollers[_si].left;
+    }
+  } catch(e){}
 
   // ★ 弹窗定位：如果有锚点元素，定位到其附近而非屏幕中心
   if (opts.anchorEl) {
@@ -5303,7 +5329,30 @@ function meowCTCellPopup(opts) {
   }
 
   // Focus first input
-  setTimeout(function(){ var first = popup.querySelector('input,textarea'); if (first) first.focus(); }, 50);
+  setTimeout(function(){
+    var first = popup.querySelector('input,textarea');
+    if (first) {
+      // 保存所有父级滚动位置，防止 focus 导致跳动
+      var scrollers = [];
+      try {
+        var p = popup.parentElement;
+        while (p) {
+          if (p.scrollTop > 0 || p.scrollLeft > 0) {
+            scrollers.push({ el: p, top: p.scrollTop, left: p.scrollLeft });
+          }
+          p = p.parentElement;
+        }
+      } catch(e){}
+      first.focus({ preventScroll: true });
+      // 还原滚动位置（兜底：某些浏览器不支持 preventScroll）
+      try {
+        for (var si = 0; si < scrollers.length; si++) {
+          scrollers[si].el.scrollTop = scrollers[si].top;
+          scrollers[si].el.scrollLeft = scrollers[si].left;
+        }
+      } catch(e){}
+    }
+  }, 50);
 
   overlay.addEventListener('click', function(e) {
     var act = e.target.getAttribute('data-popup-act');
