@@ -12434,8 +12434,16 @@ renderAll = function(){
   function doSwitch(now, old){
     void(0)&&console.log('[MEOW][Poller] 聊天切换检测到:', old.slice(0,30), '→', now.slice(0,30));
 
-    // 1) 保存旧聊天世界书 + 加载新聊天世界书
-    try{ meowSaveWBForChat(old); }catch(e){}
+    // ★ 如果新 UID 无效（退出聊天了），只做轻量清理，不做重操作
+    if (!now || now.startsWith('fallback:') || now.startsWith('char:')){
+      window.__MEOW_SUM_ACTIVE_UID__ = '';
+      return;
+    }
+
+    // 1) 保存旧聊天世界书（仅旧 UID 有效时）
+    if (old && !old.startsWith('fallback:') && !old.startsWith('char:')){
+      try{ meowSaveWBForChat(old); }catch(e){}
+    }
 
     // 2) 加载新聊天本地世界书
     let loaded = false;
@@ -12450,15 +12458,16 @@ renderAll = function(){
     // 3) 刷新世界书 UI
     try{ window.MEOW_WB_REFRESH?.(); }catch(e){}
 
-    // 4) ✅ 切换酒馆世界书条目 enabled 状态
-    (async ()=>{
-      try{
-        await meowToggleTavernEntries(now);
-        void(0)&&console.log('[MEOW][Poller] meowToggleTavernEntries 完成:', now.slice(0,30));
-      }catch(e){
-        console.warn('[MEOW][Poller] toggle 失败:', e);
-      }
-    })();
+    // 4) ✅ 切换酒馆世界书条目（延迟执行，避免阻塞主线程）
+    setTimeout(()=>{
+      (async ()=>{
+        try{
+          await meowToggleTavernEntries(now);
+        }catch(e){
+          console.warn('[MEOW][Poller] toggle 失败:', e);
+        }
+      })();
+    }, 300);
 
     // 5) 更新总结弹窗（如果开着的话）
     window.__MEOW_SUM_ACTIVE_UID__ = now;
@@ -12467,8 +12476,25 @@ renderAll = function(){
     }
   }
 
+  // ★ 轮询间隔：移动端放宽到 3 秒，桌面 1.5 秒
+  const _pollMs = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 3000 : 1500;
+
   setInterval(()=>{
     try{
+      // ★ 如果页面不可见（切到后台/其他 tab），跳过检测
+      if (doc.hidden) return;
+
+      // ★ 如果没有聊天消息可见（不在聊天页面），跳过
+      const hasMes = doc.querySelector('.mes');
+      if (!hasMes){
+        // 退出聊天了，重置 UID 但不做重操作
+        if (lastUID && !lastUID.startsWith('fallback:')){
+          lastUID = '';
+          lastRawChatId = '';
+        }
+        return;
+      }
+
       // ✅ 双重检测：先看 SillyTavern 原生 chatId 是否变了（分支场景更灵敏）
       const rawNow = getRawChatId();
       if (rawNow && rawNow !== lastRawChatId){
@@ -12494,7 +12520,7 @@ renderAll = function(){
       lastUID = now;
       doSwitch(now, old);
     }catch(e){}
-  }, 1500);  // ✅ 从 2500 降到 1500，分支检测更灵敏
+  }, _pollMs);
 
 
 })();
