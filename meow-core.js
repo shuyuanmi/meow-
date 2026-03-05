@@ -6728,8 +6728,9 @@ window.__MEOW_SUM_CHAT_SWITCH__ = (newUID)=>{
     if (promptEl && st?.prompt) promptEl.value = st.prompt;
 
     void(0)&&console.log('[MEOW][ChatSwitch] 切换总结到:', newUID.slice(0,30), st?.out ? '(有总结)' : '(暂无总结)');
-    // ★ 仅在弹窗已打开超过2秒时才弹 toast（避免初始化时刷屏）
-    if (window.__MEOW_SUM_MODAL_OPEN_TS__ && (Date.now() - window.__MEOW_SUM_MODAL_OPEN_TS__ > 2000)){
+    // ★ 仅在总结弹窗可见时才弹 toast
+    var _sumModal = doc.getElementById('meow-summary-modal');
+    if (_sumModal && _sumModal.offsetParent !== null){
       toast(`已切换到该聊天${st?.out ? '（有总结）' : '（暂无总结）'}`);
     }
   }catch(e){}
