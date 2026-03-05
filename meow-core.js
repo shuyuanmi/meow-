@@ -1139,7 +1139,7 @@ details[open] > summary .meow-pack-arrow{ transform:rotate(90deg); }
 /* 单元格编辑弹窗 */
 .meow-cell-popup-overlay{
   position:fixed;top:0;left:0;right:0;bottom:0;
-  background:transparent;z-index:99999;
+  background:transparent;z-index:100000;
   display:flex;align-items:center;justify-content:center;
   pointer-events:auto;
 }
@@ -5245,7 +5245,12 @@ function meowMultiAddCustomEntry(multi, name, icon){
 
 // ===================== V3: 单元格编辑弹窗 =====================
 function meowCTCellPopup(opts) {
-  // opts: { title, fields: [{label, key, value, type:'input'|'textarea'}], onConfirm(values), onDelete?() }
+  // opts: { title, fields: [{label, key, value, type:'input'|'textarea'}], onConfirm(values), onDelete?(), anchorEl? }
+
+  // ★ 防重复：关闭已有弹窗
+  var oldOverlay = doc.querySelector('.meow-cell-popup-overlay');
+  if (oldOverlay) oldOverlay.remove();
+
   var overlay = doc.createElement('div');
   overlay.className = 'meow-cell-popup-overlay';
   var popup = doc.createElement('div');
@@ -5272,35 +5277,8 @@ function meowCTCellPopup(opts) {
   popup.innerHTML = h;
   overlay.appendChild(popup);
 
-  // ★ 插入到模态窗口内部（避免 backdrop-filter 创建的 stacking context 遮挡）
-  var modalHost = doc.getElementById('meow-summary-modal') || doc.getElementById('meow-diary-modal') || doc.body;
-
-  // ★ 保存所有可滚动父级的滚动位置（插入 overlay 和 focus 都会触发回弹）
-  var _savedScrollers = [];
-  try {
-    var _p = modalHost;
-    while (_p) {
-      if (_p.scrollTop > 0 || _p.scrollLeft > 0) {
-        _savedScrollers.push({ el: _p, top: _p.scrollTop, left: _p.scrollLeft });
-      }
-      _p = _p.parentElement;
-    }
-    // 也保存 modalHost 内部的可滚动子容器
-    var _inner = modalHost.querySelector('.meow-modal-body') || modalHost.querySelector('[style*="overflow"]');
-    if (_inner && (_inner.scrollTop > 0 || _inner.scrollLeft > 0)) {
-      _savedScrollers.push({ el: _inner, top: _inner.scrollTop, left: _inner.scrollLeft });
-    }
-  } catch(e){}
-
-  modalHost.appendChild(overlay);
-
-  // ★ 立即还原滚动位置
-  try {
-    for (var _si = 0; _si < _savedScrollers.length; _si++) {
-      _savedScrollers[_si].el.scrollTop = _savedScrollers[_si].top;
-      _savedScrollers[_si].el.scrollLeft = _savedScrollers[_si].left;
-    }
-  } catch(e){}
+  // ★ 插入到 body（不插入 modal 内部，避免触发 modal 滚动重置）
+  (doc.body || doc.documentElement).appendChild(overlay);
 
   // ★ 弹窗定位：如果有锚点元素，定位到其附近而非屏幕中心
   if (opts.anchorEl) {
