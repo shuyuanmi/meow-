@@ -1138,8 +1138,8 @@ details[open] > summary .meow-data-arrow{ transform:rotate(90deg); }
 details[open] > summary .meow-pack-arrow{ transform:rotate(90deg); }
 /* 单元格编辑弹窗 */
 .meow-cell-popup-overlay{
-  position:fixed;top:0;left:0;right:0;bottom:0;
-  background:transparent;z-index:99999;
+  position:absolute;top:0;left:0;right:0;bottom:0;
+  background:rgba(0,0,0,.08);z-index:99999;
   display:flex;align-items:center;justify-content:center;
   pointer-events:auto;
 }
@@ -5281,38 +5281,48 @@ function meowCTCellPopup(opts) {
   // ★ 插入到模态窗口内部（backdrop-filter 创建层叠上下文，必须在内部才可见）
   var modalHost = doc.getElementById('meow-summary-modal') || doc.getElementById('meow-diary-modal') || doc.body;
 
-  // 先隐藏插入，避免触发重排导致滚动跳动
-  overlay.style.visibility = 'hidden';
+  // ★ 关键：overlay 用 absolute 覆盖整个滚动内容区，不是 fixed 覆盖可视区
+  overlay.style.position = 'absolute';
+  overlay.style.top = '0';
+  overlay.style.left = '0';
+  overlay.style.right = '0';
+  overlay.style.bottom = 'auto';
+  overlay.style.height = Math.max(modalHost.scrollHeight, modalHost.clientHeight) + 'px';
+
   modalHost.appendChild(overlay);
 
-  // ★ 弹窗定位：如果有锚点元素，用视口坐标定位到其附近
-  // 注意：modal 有 backdrop-filter，内部 fixed 等效 absolute，所以用视口坐标 - modal偏移
+  // ★ 弹窗定位：计算锚点在 modal 滚动内容中的绝对位置
   if (opts.anchorEl) {
-    overlay.style.alignItems = 'flex-start';
-    overlay.style.justifyContent = 'flex-start';
+    overlay.style.display = 'block'; // 不用 flex 居中
     try {
-      var rect = opts.anchorEl.getBoundingClientRect();
-      var modalRect = modalHost.getBoundingClientRect();
-      var popH = popup.offsetHeight || 200;
-      var popW = popup.offsetWidth || 300;
-      var winH = W.innerHeight || 600;
-      var winW = W.innerWidth || 400;
-      // 优先在锚点下方
-      var top = rect.bottom + 8;
-      if (top + popH > winH - 16) {
-        top = Math.max(16, rect.top - popH - 8);
+      // 计算 anchorEl 相对于 modalHost 的偏移
+      var anchorTop = 0, anchorLeft = 0;
+      var el = opts.anchorEl;
+      while (el && el !== modalHost) {
+        anchorTop += el.offsetTop || 0;
+        anchorLeft += el.offsetLeft || 0;
+        el = el.offsetParent;
       }
-      var left = Math.max(8, Math.min(rect.left, winW - popW - 8));
-      // 转换为相对 modal 的坐标（backdrop-filter 让 fixed 变 absolute）
-      popup.style.position = 'fixed';
+      var anchorH = opts.anchorEl.offsetHeight || 20;
+      var popW = popup.offsetWidth || 300;
+      var modalW = modalHost.clientWidth || 400;
+
+      // 弹窗放在锚点正下方
+      var top = anchorTop + anchorH + 8;
+      var left = Math.max(8, Math.min(anchorLeft, modalW - popW - 16));
+
+      popup.style.position = 'absolute';
       popup.style.top = top + 'px';
       popup.style.left = left + 'px';
       popup.style.margin = '0';
     } catch(e){}
+  } else {
+    // 无锚点：在当前滚动位置居中
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'flex-start';
+    overlay.style.justifyContent = 'center';
+    overlay.style.paddingTop = (modalHost.scrollTop + Math.round(modalHost.clientHeight * 0.15)) + 'px';
   }
-
-  // 显示
-  overlay.style.visibility = '';
 
   // Focus first input
   setTimeout(function(){
