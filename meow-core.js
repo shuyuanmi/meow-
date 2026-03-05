@@ -9313,10 +9313,13 @@ padding:14px;
   overflow-x:auto;
   overflow-y:hidden;
   -webkit-overflow-scrolling:touch;
-  scrollbar-width:none;
-  padding:2px 2px 0;
+  scrollbar-width:thin;
+  scrollbar-color:rgba(139,115,85,.18) transparent;
+  padding:2px 2px 4px;
 }
-#wbv4_root .wbv4Tabs::-webkit-scrollbar{ display:none; }
+#wbv4_root .wbv4Tabs::-webkit-scrollbar{ height:3px; }
+#wbv4_root .wbv4Tabs::-webkit-scrollbar-track{ background:transparent; }
+#wbv4_root .wbv4Tabs::-webkit-scrollbar-thumb{ background:rgba(139,115,85,.22); border-radius:4px; }
 
 #wbv4_root .wbv4Tab{
   flex:0 0 auto;
@@ -9602,11 +9605,11 @@ ensureWbv4Style();
     'border:1px solid rgba(0,0,0,.10);border-radius:10px;' +
     'padding:3px 8px;background:rgba(255,255,255,.62);' +
     'color:rgba(46,38,30,.82);outline:none;cursor:pointer;' +
-    'appearance:auto;max-width:120px;';
+    'appearance:auto;max-width:160px;';
 
   // 注意：把“可视化”做短，不要“表格可视化 ▾”这种长文案
   sel.innerHTML =
-    '<option value="table">可视化</option>' +
+    '<option value="table">可视化（表格版）</option>' +
     '<option value="big">大总结</option>' +
     '<option value="small">小总结</option>' +
     '<option value="custom">自定义</option>';
@@ -9888,6 +9891,17 @@ ensureWbv4Style();
     }, {passive:false});
     $tabs.appendChild(plus);
     // 不 scrollIntoView：不回跳
+
+    // ★ 电脑端：鼠标滚轮横向滚动 tab 条
+    if (!$tabs.__meowWheelBound){
+      $tabs.__meowWheelBound = true;
+      $tabs.addEventListener('wheel', function(e){
+        if (Math.abs(e.deltaY) > Math.abs(e.deltaX)){
+          e.preventDefault();
+          $tabs.scrollLeft += e.deltaY;
+        }
+      }, {passive:false});
+    }
   }
 
   function renderList(db){
@@ -9952,6 +9966,29 @@ ensureWbv4Style();
       return null;
     }
 
+    // ===== 解析 "key：value | key：value" 管道分隔文本为 key-value 对 =====
+    function parsePipeText(text){
+      const src = String(text||'').trim();
+      if (!src) return null;
+      // 按 | 分割，每段尝试解析 key：value 或 key:value
+      const segments = src.split(/[|｜]/).map(s=>s.trim()).filter(Boolean);
+      if (segments.length < 2) return null; // 至少2个字段才走表格
+      const result = [];
+      for (const seg of segments){
+        // 匹配 "key：value" 或 "key: value"（中英文冒号都支持）
+        const m = seg.match(/^([^：:]+)[：:](.+)$/);
+        if (m){
+          result.push({ k: m[1].trim(), v: m[2].trim() });
+        } else {
+          result.push({ k: '', v: seg.trim() });
+        }
+      }
+      // 至少有一半以上的段有 key 才算有效表格
+      const withKey = result.filter(r=>r.k).length;
+      if (withKey < result.length * 0.4) return null;
+      return result;
+    }
+
     // ===== 构建 HTML =====
     let html = '';
     for (const c of items){
@@ -9977,17 +10014,39 @@ ensureWbv4Style();
     </div>
   </div>`;
       } else {
-        // 纯文本视图（无法解析为表格时）
-        html += `
+        // ★ 智能视图：尝试解析 "key：value | key：value" 格式为简约表格
+        const pipeTable = parsePipeText(c.text);
+        if (pipeTable && pipeTable.length){
+          html += `
+  <div class="wbv4CardWrap" data-id="${esc(c.id)}">
+    <div class="wbv4Card" data-open="${esc(c.id)}" style="padding:8px;overflow-x:auto;">
+      <div class="wbv4TitleRow" style="margin-bottom:6px;">
+        <div class="wbv4Title">${esc(c.title||'未命名')}</div>
+        <div class="wbv4Key">${esc(c.key||'')}</div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;line-height:1.5;table-layout:fixed;">
+        <tbody>
+          ${pipeTable.map(kv=>`<tr>
+            <td style="padding:4px 8px;border-bottom:1px solid var(--meow-line,rgba(0,0,0,.06));font-weight:700;color:var(--meow-text,rgba(72,60,48,.85));white-space:nowrap;width:auto;vertical-align:top;">${esc(kv.k)}</td>
+            <td style="padding:4px 8px;border-bottom:1px solid var(--meow-line,rgba(0,0,0,.06));color:var(--meow-text);word-break:break-word;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;">${esc(kv.v)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+        } else {
+          // 纯文本视图（无法解析时）
+          html += `
   <div class="wbv4CardWrap" data-id="${esc(c.id)}">
     <div class="wbv4Card" data-open="${esc(c.id)}">
       <div class="wbv4TitleRow">
         <div class="wbv4Title">${esc(c.title||'未命名')}</div>
         <div class="wbv4Key">${esc(c.key||'')}</div>
       </div>
-      <div class="wbv4Text" style="white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.5;color:var(--meow-text);">${esc(c.text||'（空）')}</div>
+      <div class="wbv4Text" style="white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.5;color:var(--meow-text);overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;">${esc(c.text||'（空）')}</div>
     </div>
   </div>`;
+        }
       }
     }
 
