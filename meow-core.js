@@ -9314,12 +9314,13 @@ padding:14px;
   overflow-y:hidden;
   -webkit-overflow-scrolling:touch;
   scrollbar-width:thin;
-  scrollbar-color:rgba(139,115,85,.18) transparent;
-  padding:2px 2px 4px;
+  scrollbar-color:rgba(139,115,85,.12) transparent;
+  padding:2px 2px 3px;
+  touch-action:pan-x;
 }
-#wbv4_root .wbv4Tabs::-webkit-scrollbar{ height:3px; }
+#wbv4_root .wbv4Tabs::-webkit-scrollbar{ height:2px; }
 #wbv4_root .wbv4Tabs::-webkit-scrollbar-track{ background:transparent; }
-#wbv4_root .wbv4Tabs::-webkit-scrollbar-thumb{ background:rgba(139,115,85,.22); border-radius:4px; }
+#wbv4_root .wbv4Tabs::-webkit-scrollbar-thumb{ background:rgba(139,115,85,.15); border-radius:2px; }
 
 #wbv4_root .wbv4Tab{
   flex:0 0 auto;
@@ -9901,6 +9902,16 @@ ensureWbv4Style();
           $tabs.scrollLeft += e.deltaY;
         }
       }, {passive:false});
+
+      // ★ 手机端：阻止 tab 横滑冒泡到聊天区（防止误触 swipe-to-reroll）
+      let _touchStartX = 0;
+      $tabs.addEventListener('touchstart', function(e){
+        _touchStartX = e.touches[0].clientX;
+      }, {passive:true});
+      $tabs.addEventListener('touchmove', function(e){
+        const dx = Math.abs(e.touches[0].clientX - _touchStartX);
+        if (dx > 5) e.stopPropagation(); // 横滑超过5px就吞掉，不让外层接收
+      }, {passive:false});
     }
   }
 
@@ -9995,47 +10006,41 @@ ensureWbv4Style();
       const table = parseTextToTable(c.text);
 
       if (table && table.headers.length){
-        // 表格视图
+        // 表格视图（紧凑版）
         html += `
   <div class="wbv4CardWrap" data-id="${esc(c.id)}">
-    <div class="wbv4Card" data-open="${esc(c.id)}" style="padding:8px;overflow-x:auto;">
-      <div class="wbv4TitleRow" style="margin-bottom:8px;">
-        <div class="wbv4Title">${esc(c.title||'未命名')}</div>
-        <div class="wbv4Key">${esc(c.key||'')}</div>
+    <div class="wbv4Card" data-open="${esc(c.id)}" style="padding:6px;overflow-x:auto;">
+      <div class="wbv4TitleRow" style="margin-bottom:4px;">
+        <div class="wbv4Title" style="font-size:12px;">${esc(c.title||'未命名')}</div>
       </div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px;line-height:1.4;">
+      <table style="width:100%;border-collapse:collapse;font-size:11px;line-height:1.4;table-layout:auto;">
         <thead>
-          <tr>${table.headers.map(h=>`<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--meow-line,rgba(0,0,0,.12));font-weight:900;color:var(--meow-text,rgba(72,60,48,.90));white-space:nowrap;">${esc(h)}</th>`).join('')}</tr>
+          <tr>${table.headers.map(h=>`<th style="text-align:left;padding:3px 6px;border-bottom:2px solid var(--meow-line,rgba(0,0,0,.1));font-weight:800;color:var(--meow-text,rgba(72,60,48,.90));white-space:nowrap;font-size:10px;">${esc(h)}</th>`).join('')}</tr>
         </thead>
         <tbody>
-          ${table.rows.map(row=>`<tr>${row.map((cell,ci)=>`<td style="padding:5px 8px;border-bottom:1px solid var(--meow-line,rgba(0,0,0,.06));color:var(--meow-text);word-break:break-word;max-width:${Math.floor(100/table.headers.length)}vw;">${esc(cell)}</td>`).join('')}</tr>`).join('')}
+          ${table.rows.map(row=>`<tr>${row.map((cell,ci)=>`<td style="padding:3px 6px;border-bottom:1px solid var(--meow-line,rgba(0,0,0,.05));color:var(--meow-text);word-break:break-word;max-width:120px;vertical-align:top;">${esc(cell)}</td>`).join('')}</tr>`).join('')}
         </tbody>
       </table>
     </div>
   </div>`;
       } else {
-        // ★ 智能视图：尝试解析 "key：value | key：value" 格式为简约表格
+        // ★ 智能视图：尝试解析 "key：value | key：value" 格式为横向紧凑表格
         const pipeTable = parsePipeText(c.text);
         if (pipeTable && pipeTable.length){
           html += `
   <div class="wbv4CardWrap" data-id="${esc(c.id)}">
-    <div class="wbv4Card" data-open="${esc(c.id)}" style="padding:8px;overflow-x:auto;">
-      <div class="wbv4TitleRow" style="margin-bottom:6px;">
-        <div class="wbv4Title">${esc(c.title||'未命名')}</div>
-        <div class="wbv4Key">${esc(c.key||'')}</div>
+    <div class="wbv4Card" data-open="${esc(c.id)}" style="padding:6px;overflow-x:auto;">
+      <div class="wbv4TitleRow" style="margin-bottom:4px;">
+        <div class="wbv4Title" style="font-size:12px;">${esc(c.title||'未命名')}</div>
       </div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px;line-height:1.5;table-layout:fixed;">
-        <tbody>
-          ${pipeTable.map(kv=>`<tr>
-            <td style="padding:4px 8px;border-bottom:1px solid var(--meow-line,rgba(0,0,0,.06));font-weight:700;color:var(--meow-text,rgba(72,60,48,.85));white-space:nowrap;width:auto;vertical-align:top;">${esc(kv.k)}</td>
-            <td style="padding:4px 8px;border-bottom:1px solid var(--meow-line,rgba(0,0,0,.06));color:var(--meow-text);word-break:break-word;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;">${esc(kv.v)}</td>
-          </tr>`).join('')}
-        </tbody>
+      <table style="width:100%;border-collapse:collapse;font-size:11px;line-height:1.4;table-layout:auto;">
+        <thead><tr>${pipeTable.map(kv=>`<th style="padding:3px 6px;border-bottom:2px solid var(--meow-line,rgba(0,0,0,.1));font-weight:800;color:var(--meow-text,rgba(72,60,48,.85));white-space:nowrap;font-size:10px;">${esc(kv.k||'—')}</th>`).join('')}</tr></thead>
+        <tbody><tr>${pipeTable.map(kv=>`<td style="padding:3px 6px;border-bottom:1px solid var(--meow-line,rgba(0,0,0,.05));color:var(--meow-text);word-break:break-word;max-width:120px;overflow:hidden;display:table-cell;vertical-align:top;">${esc(kv.v)}</td>`).join('')}</tr></tbody>
       </table>
     </div>
   </div>`;
         } else {
-          // 纯文本视图（无法解析时）
+          // 纯文本视图（无法解析时，限制3行）
           html += `
   <div class="wbv4CardWrap" data-id="${esc(c.id)}">
     <div class="wbv4Card" data-open="${esc(c.id)}">
@@ -10043,7 +10048,7 @@ ensureWbv4Style();
         <div class="wbv4Title">${esc(c.title||'未命名')}</div>
         <div class="wbv4Key">${esc(c.key||'')}</div>
       </div>
-      <div class="wbv4Text" style="white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.5;color:var(--meow-text);overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;">${esc(c.text||'（空）')}</div>
+      <div class="wbv4Text" style="white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.4;color:var(--meow-text);overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;">${esc(c.text||'（空）')}</div>
     </div>
   </div>`;
         }
