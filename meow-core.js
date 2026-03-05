@@ -2472,29 +2472,9 @@ function meowGetLatestFloorFromDOM(){
   return null;
 }
 
-// ✅ 全局：强制确保当前 LS_WB 属于当前聊天（打开任何弹窗前调用）
+// ✅ 全局：确保世界书 UI 是最新的（简化版：快照已废弃，只刷 UI）
 function meowForceWBSyncForCurrentChat(){
-  try{
-    const uid = meowGetChatUID();
-    if (!uid || uid.startsWith('fallback:')) return;
-    const wb = lsGet(LS_WB, null);
-    const owner = wb?._chatUID || '';
-    if (owner === uid) return; // 已经是当前聊天的，不用动
-
-    void(0)&&console.log('[MEOW][ForceSync] WB 归属不匹配:', owner.slice(0,20), '→', uid.slice(0,20));
-    // 保存旧的
-    if (owner) meowSaveWBForChat(owner);
-    // 加载新的
-    const loaded = meowLoadWBForChat(uid);
-    if (!loaded){
-      const fresh = (typeof meowMakeFreshWB === 'function') ? meowMakeFreshWB(uid) : null;
-      if (fresh){
-        lsSet(LS_WB, fresh);
-        meowSaveWBForChat(uid);
-      }
-    }
-    try{ window.MEOW_WB_REFRESH?.(); }catch(e){}
-  }catch(e){}
+  try{ window.MEOW_WB_REFRESH?.(); }catch(e){}
 }
 
 function meowLoadChatState(uid){
@@ -12414,116 +12394,9 @@ renderAll = function(){
     return true;
   }
 
-// ✅ 全局聊天切换检测器（不依赖 MutationObserver，纯定时轮询）
-(function meowGlobalChatPoller(){
-  let lastUID = '';
-  try{ lastUID = meowGetChatUID(); }catch(e){}
-
-  // ✅ 专门追踪 SillyTavern 原生 chatId（分支检测更灵敏）
-  let lastRawChatId = '';
-  function getRawChatId(){
-    try{
-      const ctx = (window.SillyTavern?.getContext?.() ||
-                   window.top?.SillyTavern?.getContext?.() ||
-                   window.parent?.SillyTavern?.getContext?.());
-      return String(ctx?.chatId || '') || '';
-    }catch(e){ return ''; }
-  }
-  try{ lastRawChatId = getRawChatId(); }catch(e){}
-
-  function doSwitch(now, old){
-    void(0)&&console.log('[MEOW][Poller] 聊天切换检测到:', old.slice(0,30), '→', now.slice(0,30));
-
-    // ★ 如果新 UID 无效（退出聊天了），只做轻量清理，不做重操作
-    if (!now || now.startsWith('fallback:') || now.startsWith('char:')){
-      window.__MEOW_SUM_ACTIVE_UID__ = '';
-      return;
-    }
-
-    // 1) 保存旧聊天世界书（仅旧 UID 有效时）
-    if (old && !old.startsWith('fallback:') && !old.startsWith('char:')){
-      try{ meowSaveWBForChat(old); }catch(e){}
-    }
-
-    // 2) 加载新聊天本地世界书
-    let loaded = false;
-    try{ loaded = meowLoadWBForChat(now); }catch(e){}
-    if (!loaded){
-      try{
-        const fresh = meowMakeFreshWB(now) || meowMakeFreshWBForChat();
-        if (fresh){ lsSet(LS_WB, fresh); meowSaveWBForChat(now); }
-      }catch(e){}
-    }
-
-    // 3) 刷新世界书 UI
-    try{ window.MEOW_WB_REFRESH?.(); }catch(e){}
-
-    // 4) ✅ 切换酒馆世界书条目（延迟执行，避免阻塞主线程）
-    setTimeout(()=>{
-      (async ()=>{
-        try{
-          await meowToggleTavernEntries(now);
-        }catch(e){
-          console.warn('[MEOW][Poller] toggle 失败:', e);
-        }
-      })();
-    }, 300);
-
-    // 5) 更新总结弹窗（如果开着的话）
-    window.__MEOW_SUM_ACTIVE_UID__ = now;
-    if (typeof window.__MEOW_SUM_CHAT_SWITCH__ === 'function'){
-      try{ window.__MEOW_SUM_CHAT_SWITCH__(now); }catch(e){}
-    }
-  }
-
-  // ★ 轮询间隔：移动端放宽到 3 秒，桌面 1.5 秒
-  const _pollMs = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 3000 : 1500;
-
-  setInterval(()=>{
-    try{
-      // ★ 如果页面不可见（切到后台/其他 tab），跳过检测
-      if (doc.hidden) return;
-
-      // ★ 如果没有聊天消息可见（不在聊天页面），跳过
-      const hasMes = doc.querySelector('.mes');
-      if (!hasMes){
-        // 退出聊天了，重置 UID 但不做重操作
-        if (lastUID && !lastUID.startsWith('fallback:')){
-          lastUID = '';
-          lastRawChatId = '';
-        }
-        return;
-      }
-
-      // ✅ 双重检测：先看 SillyTavern 原生 chatId 是否变了（分支场景更灵敏）
-      const rawNow = getRawChatId();
-      if (rawNow && rawNow !== lastRawChatId){
-        lastRawChatId = rawNow;
-        // 原生 chatId 变了 → 强制重算 UID
-        const now = meowGetChatUID();
-        if (now && !now.startsWith('fallback:') && !now.startsWith('char:')){
-          if (now !== lastUID){
-            const old = lastUID;
-            lastUID = now;
-            doSwitch(now, old);
-          }
-          return;
-        }
-      }
-
-      const now = meowGetChatUID();
-      // 跳过临时/无效 UID
-      if (!now || now.startsWith('fallback:') || now.startsWith('char:')) return;
-      if (now === lastUID) return;
-
-      const old = lastUID;
-      lastUID = now;
-      doSwitch(now, old);
-    }catch(e){}
-  }, _pollMs);
-
-
-})();
+// ===================== ✅ 轮询已移除 =====================
+// 聊天切换检测现在完全由 meowBindChatAutoLoad（MutationObserver + hashchange）驱动
+// 不再有 setInterval 轮询，手机端不会卡死
 
 
 
