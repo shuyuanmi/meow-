@@ -2541,14 +2541,40 @@ function meowBindChatAutoLoad(onChange){
 // ===================== Per-Chat 世界书自动切换 =====================
 // ===================== Per-Chat 世界书自动切换（V2：标记所有权 + 延迟初始化） =====================
 
-// ✅ 已废弃但保留定义（meowSyncTavernForChat 仍读取旧快照做兜底）
 const LS_WB_BY_CHAT = 'meow_wb_by_chat_v1';
 
-  // ✅ 已废弃：本地快照不再使用，保留空壳避免调用方报错
-  function meowSaveWBForChat(){ return true; }
+  // ===== 补齐：per-chat 世界书快照 存/取（修复 meowSaveWBForChat 未定义导致的链路中断）=====
+  function meowSaveWBForChat(chatUID){
+    try{
+      // 快照已废弃，WB数据跟随chat context，不再存储
+      return true;
+      const uid = String(chatUID||''); if (!uid) return false;
+      const cur = lsGet(LS_WB, null);
+      if (!cur || cur.v !== 4) return false;
+      cur._chatUID = uid;
+      const box = lsGet(LS_WB_BY_CHAT, { map:{} });
+      box.map ||= {};
+      box.map[uid] = { t: Date.now(), data: cur };
+      lsSet(LS_WB_BY_CHAT, box);
+      return true;
+    }catch(e){ return false; }
+  }
 
-  // ✅ 已废弃：本地快照不再使用
-  function meowLoadWBForChat(){ return false; }
+  function meowLoadWBForChat(chatUID){
+    try{
+      // 快照已废弃，直接返回false走远端加载
+      return false;
+      const uid = String(chatUID||''); if (!uid) return false;
+      const box = lsGet(LS_WB_BY_CHAT, { map:{} });
+      const snap = box?.map?.[uid];
+      if (!snap || !snap.data || snap.data.v !== 4) return false;
+
+      const db = snap.data;
+      db._chatUID = uid;
+      lsSet(LS_WB, db);
+      return true;
+    }catch(e){ return false; }
+  }
 
 // ===================== 聊天UID短哈希（用于酒馆世界书条目隔离） =====================
 function meowChatHash(uid){
@@ -3041,24 +3067,88 @@ async function meowLoadWBFromTavern(__chatUID){
 }
 
 
-// ✅ 简化版：聊天切换处理（本地快照已废弃，只做必要操作）
 function meowSwitchWBChat(oldUID, newUID){
+  const uidOld = String(oldUID || '');
   const uidNew = String(newUID || '');
   if (!uidNew) return;
+
+  // 1) 先保存旧聊天（本地快照）
+  if (uidOld) meowSaveWBForChat(uidOld);
+
   (async ()=>{
+    // 2) 先切酒馆世界书 enabled（保证“未进入该聊天时不污染”）
     try{ await meowToggleTavernEntries(uidNew); }catch(e){}
-    try{ await meowLoadWBFromTavern(uidNew); }catch(e){}
-    try{ window.MEOW_WB_REFRESH?.(); }catch(e){}
+
+    // 3) 优先从酒馆世界书拉取该聊天（跨端真源）
+    let loadedRemote = false;
+    try{ loadedRemote = await meowLoadWBFromTavern(uidNew); }catch(e){ loadedRemote = false; }
+
+    if (loadedRemote){
+      try{ meowSaveWBForChat(uidNew); }catch(e){}
+      try{ window.MEOW_WB_REFRESH?.(); }catch(e){}
+    } else {
+      // 4) 酒馆没有 → 读本地快照；没有就创建空白
+      let loadedLocal = false;
+      try{ loadedLocal = meowLoadWBForChat(uidNew); }catch(e){ loadedLocal = false; }
+
+      if (!loadedLocal){
+        let fresh = null;
+        try{ fresh = (typeof meowMakeFreshWBForChat === 'function') ? meowMakeFreshWBForChat() : null; }catch(e){ fresh=null; }
+        if (!fresh){
+          try{ fresh = (typeof meowMakeFreshWB === 'function') ? meowMakeFreshWB(uidNew) : null; }catch(e){ fresh=null; }
+        }
+        if (fresh){
+          try{ fresh._chatUID = uidNew; }catch(e){}
+          try{ lsSet(LS_WB, fresh); }catch(e){}
+          try{ meowSaveWBForChat(uidNew); }catch(e){}
+        }
+      }
+
+      try{ window.MEOW_WB_REFRESH?.(); }catch(e){}
+
+      // 5) 本地有数据但远端没有 → 推一次（让另一台设备能读到）
+      try{
+        if (typeof meowSyncTavernForChat === 'function'){
+          setTimeout(()=>{ try{ meowSyncTavernForChat(uidNew); }catch(e){} }, 180);
+        }
+      }catch(e){}
+    }
+
+    // 6) 更新总结模块的活跃 UID
     try{
       window.__MEOW_SUM_ACTIVE_UID__ = uidNew;
-      if (typeof window.__MEOW_SUM_CHAT_SWITCH__ === 'function') window.__MEOW_SUM_CHAT_SWITCH__(uidNew);
+      if (typeof window.__MEOW_SUM_CHAT_SWITCH__ === 'function'){
+        window.__MEOW_SUM_CHAT_SWITCH__(uidNew);
+      }
     }catch(e){}
   })();
 }
 // ----- 检查当前 LS_WB 是否属于当前聊天（标记法）-----
-// ✅ 简化版：本地快照已废弃，只刷新 UI
 function meowEnsureWBBelongsToChat(uid){
-  try{ window.MEOW_WB_REFRESH?.(); }catch(e){}
+  try{
+    const wb = lsGet(LS_WB, null);
+    if (!wb || wb.v !== 4) return;
+
+    const owner = wb._chatUID || '';
+
+    // 如果 LS_WB 已经属于当前聊天，不用动
+    if (owner === uid) return;
+
+    // 如果有所有者（是别的聊天的数据）→ 先保存给它，再加载自己的
+    if (owner) meowSaveWBForChat(owner);
+
+    // 加载自己的
+    const loaded = meowLoadWBForChat(uid);
+    if (!loaded){
+      const fresh = meowMakeFreshWB(uid);
+      if (fresh){
+        lsSet(LS_WB, fresh);
+        meowSaveWBForChat(uid);
+      }
+    }
+
+    try{ window.MEOW_WB_REFRESH?.(); }catch(e){}
+  }catch(e){}
 }
 
 // 延迟初始化：等消息加载完再检测（云酒馆消息加载比较慢）
@@ -3110,8 +3200,20 @@ meowBindChatAutoLoad((newUID, oldUID)=>{
   }, 1400); // 比世界书稍晚 200ms，避免同时读写冲突
 });
 
-// ✅ 已废弃（第二定义）：本地快照不再使用
-// function meowLoadWBForChat - 见上方空壳定义
+// 加载指定聊天的世界书快照到 LS_WB
+function meowLoadWBForChat(uid){
+  if (!uid) return false;
+  try{
+    const store = lsGet(LS_WB_BY_CHAT, { map:{} });
+    const entry = store.map?.[uid];
+    if (entry && entry.data && entry.data.v === 4){
+      entry.data._chatUID = uid; // ✅ 确保标记归属
+      lsSet(LS_WB, entry.data);
+      return true;
+    }
+  }catch(e){}
+  return false;
+}
 
 // 为新聊天创建一份空白世界书（保留模板结构，清空内容）
 function meowMakeFreshWBForChat(){
@@ -3151,7 +3253,40 @@ function meowMakeFreshWB(uid){
   return fresh;
 }
 
-// ✅ 已删除：第二个 meowSwitchWBChat（合并到上方简化版）
+// 切换聊天时的完整流程：保存旧 → 加载新（或新建空白）→ ✅切换酒馆条目 + 总结状态
+function meowSwitchWBChat(oldUID, newUID){
+  // 1) 保存当前世界书给旧聊天
+  if (oldUID) meowSaveWBForChat(oldUID);
+
+  // 2) 尝试加载新聊天的世界书
+  const loaded = meowLoadWBForChat(newUID);
+
+  if (!loaded){
+    // 新聊天，没有历史快照 → 创建空白世界书（保留模板结构）
+    const fresh = meowMakeFreshWBForChat();
+    if (fresh){
+      lsSet(LS_WB, fresh);
+      meowSaveWBForChat(newUID); // 立刻保存快照
+    }
+  }
+
+  // 3) 刷新世界书 UI（如果正在打开）
+  try{ window.MEOW_WB_REFRESH?.(); }catch(e){}
+
+  // ✅ 4) 切换酒馆世界书条目（防抖：避免关闭聊天时频繁触发API导致卡顿）
+  if (window.__meowToggleTimer__) clearTimeout(window.__meowToggleTimer__);
+  window.__meowToggleTimer__ = setTimeout(async ()=>{
+    try{ await meowToggleTavernEntries(newUID); }catch(e){}
+  }, 800);
+
+  // ✅ 5) 同步更新总结模块的全局 UID 追踪 + 触发弹窗刷新
+  try{
+    window.__MEOW_SUM_ACTIVE_UID__ = newUID;
+    if (typeof window.__MEOW_SUM_CHAT_SWITCH__ === 'function'){
+      window.__MEOW_SUM_CHAT_SWITCH__(newUID);
+    }
+  }catch(e){}
+}
 
 // ===================== V3: 预览浮窗（聊天输入框上方） =====================
 function openChatFloatingPanel() {
@@ -8158,6 +8293,7 @@ async function writeEntry(key, text){
     // ✅ 刷新世界书可视化
     try{ window.MEOW_WB_REFRESH?.(); }catch(e){}
 meowSaveChatState(__chatUID, { target: target, bookName: worldName });
+meowSaveWBForChat(__chatUID);
 await meowToggleTavernEntries(__chatUID);
     if (r.ok) toast(r.skipped ? '完成（Summary 未变化，已跳过重复写入）' : '完成（已写入 Summary）');
     else toast('写入失败：已落地镜像并入队（稍后打开 World Info 会自动补写）');
@@ -8168,6 +8304,8 @@ await meowToggleTavernEntries(__chatUID);
 // ✅表格模式也必须按聊天启用/禁用，避免不同聊天注入串台
 try{
   meowSaveChatState(__chatUID, { target: target, bookName: worldName });
+  meowSaveWBForChat(__chatUID);
+}catch(e){}
 try{
   if (typeof meowToggleTavernEntries === 'function') await meowToggleTavernEntries(__chatUID || '');
 }catch(e){}
@@ -8505,6 +8643,7 @@ if (!wrote){
 
   try{ window.MEOW_WB_REFRESH?.(); }catch(e){}
   meowSaveChatState(__chatUID, { target: target, bookName: worldName });
+meowSaveWBForChat(__chatUID);
 await meowToggleTavernEntries(__chatUID);
   if (r.ok) toast('完成（未识别分区，已兜底写入 Summary）');
   else toast('写入失败：无法写入世界书');
@@ -8612,6 +8751,8 @@ try {
 }
 
 meowSaveChatState(__chatUID, { target: target, bookName: worldName });
+meowSaveWBForChat(__chatUID);
+
 // ✅ 刷新世界书可视化（如果世界书弹窗正在打开，立刻更新卡片内容）
 try{ window.MEOW_WB_REFRESH?.(); }catch(e){}
 
@@ -8942,6 +9083,9 @@ function openWorldBookModal(){
       if (needSwitch){
         void(0)&&console.log('[MEOW][WB] loadDB 检测到数据不属于当前聊天:', dbOwner.slice(0,25), '→ 当前:', curUID.slice(0,25));
         // 保存给旧聊天
+        try{
+          if (typeof meowSaveWBForChat === 'function') meowSaveWBForChat(dbOwner);
+        }catch(e){}
         // 尝试加载当前聊天的快照
         let loaded = false;
         try{
@@ -8968,6 +9112,9 @@ function openWorldBookModal(){
         const nd = makeDefaultDB();
         nd._chatUID = curUID;
         _lsSet(LS_DB, nd);
+        try{
+          if (typeof meowSaveWBForChat === 'function') meowSaveWBForChat(curUID);
+        }catch(e){}
         return nd;
       }
       // 如果 dbOwner 为空（旧数据），标记当前聊天
@@ -8998,6 +9145,9 @@ function openWorldBookModal(){
   _lsSet(LS_DB, db);
   // 世界书数据已保存；tgBuildInjectionText 会直接从 LS_WB 读取，无需桥接
   // ✅ 同步保存到 per-chat 快照
+  try{
+    if (db._chatUID && typeof meowSaveWBForChat === 'function') meowSaveWBForChat(db._chatUID);
+  }catch(e){}
 }
  
 
