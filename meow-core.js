@@ -5276,6 +5276,32 @@ function meowCTCellPopup(opts) {
   var modalHost = doc.getElementById('meow-summary-modal') || doc.getElementById('meow-diary-modal') || doc.body;
   modalHost.appendChild(overlay);
 
+  // ★ 弹窗定位：如果有锚点元素，定位到其附近而非屏幕中心
+  if (opts.anchorEl) {
+    overlay.style.alignItems = 'flex-start';
+    overlay.style.justifyContent = 'flex-start';
+    setTimeout(function(){
+      try {
+        var rect = opts.anchorEl.getBoundingClientRect();
+        var popH = popup.offsetHeight || 200;
+        var popW = popup.offsetWidth || 300;
+        var winH = window.innerHeight || 600;
+        var winW = window.innerWidth || 400;
+        // 优先在锚点下方显示
+        var top = rect.bottom + 8;
+        // 如果下方空间不够，放到上方
+        if (top + popH > winH - 16) {
+          top = Math.max(16, rect.top - popH - 8);
+        }
+        var left = Math.max(8, Math.min(rect.left, winW - popW - 8));
+        popup.style.position = 'fixed';
+        popup.style.top = top + 'px';
+        popup.style.left = left + 'px';
+        popup.style.margin = '0';
+      } catch(e){}
+    }, 10);
+  }
+
   // Focus first input
   setTimeout(function(){ var first = popup.querySelector('input,textarea'); if (first) first.focus(); }, 50);
 
@@ -5368,7 +5394,7 @@ function meowCTRender(tableEl, emptyEl, data){
   for (var ci = 0; ci < data.cols.length; ci++) {
     var colPrompt = (data.colPrompts && data.colPrompts[ci]) ? data.colPrompts[ci] : '';
     var tip = colPrompt ? ' title="' + esc(colPrompt) + '"' : '';
-    html += '<th' + tip + ' style="padding:6px 8px;border:1px solid var(--meow-line,rgba(28,24,18,.08));background:var(--meow-accent-soft,rgba(198,186,164,.15));font-weight:700;min-width:80px;font-size:11px;user-select:none;color:var(--meow-text,rgba(46,38,30,.7));">' + esc(data.cols[ci]) + '</th>';
+    html += '<th data-ct-hcol="' + ci + '"' + tip + ' style="padding:6px 8px;border:1px solid var(--meow-line,rgba(28,24,18,.08));background:var(--meow-accent-soft,rgba(198,186,164,.15));font-weight:700;min-width:80px;font-size:11px;user-select:none;color:var(--meow-text,rgba(46,38,30,.7));cursor:pointer;">' + esc(data.cols[ci]) + '</th>';
   }
   html += '<th style="padding:4px 6px;border:1px solid var(--meow-line,rgba(28,24,18,.08));width:24px;background:var(--meow-accent-soft,rgba(198,186,164,.08));font-size:10px;color:var(--meow-sub,rgba(46,38,30,.3));text-align:center;cursor:pointer;" class="meow-cell-click" data-ct-addcol="1" title="添加列">＋</th>';
   html += '</tr></thead><tbody>';
@@ -6171,10 +6197,57 @@ try{ syncToTableInject( (typeof wbLoad==='function') ? wbLoad() : lsGet(LS_WB, n
     if (inlineTbl && !inlineTbl.__meowInlineBound){
       inlineTbl.__meowInlineBound = true;
       inlineTbl.addEventListener('click', function(e){
-        var el = e.target.closest ? e.target.closest('[data-ct-delrow],[data-ct-addcol],[data-ct-preview-row]') : e.target;
+        var el = e.target.closest ? e.target.closest('[data-ct-delrow],[data-ct-hcol],[data-ct-addcol],[data-ct-preview-row]') : e.target;
         if (!el) return;
         var data = (window.__meowReadCurrentData || meowTableMetaRead || function(){return null})();
         if (!data) return;
+
+        // 表头点击：编辑字段名 + 字段含义
+        if (el.hasAttribute('data-ct-hcol')){
+          var ci = parseInt(el.getAttribute('data-ct-hcol'), 10);
+          if (!Number.isFinite(ci) || ci < 0 || !data.cols || ci >= data.cols.length) return;
+          var oldName = data.cols[ci] || '';
+          var oldPrompt = (data.colPrompts && data.colPrompts[ci]) || '';
+          meowCTCellPopup({
+            title: '编辑表头「' + oldName + '」',
+            fields: [
+              { label:'字段名', key:'name', value: oldName, type:'input' },
+              { label:'发送给 AI 的字段含义提示词', key:'prompt', value: oldPrompt, type:'textarea' }
+            ],
+            anchorEl: el,
+            onConfirm: function(vals){
+              var name = (vals.name || '').trim();
+              if (!name){ toast('请输入字段名'); return; }
+              data.cols[ci] = name;
+              if (!data.colPrompts) data.colPrompts = {};
+              data.colPrompts[ci] = (vals.prompt || '').trim();
+              data.rev = (data.rev||0) + 1;
+              data.updated_at = Date.now();
+              meowTableMetaWrite(data, false);
+              if (typeof window.__meowSyncActiveBack === 'function') window.__meowSyncActiveBack(data);
+              refreshInlineTbl();
+            },
+            onDelete: function(){
+              if (data.cols.length <= 1){ toast('至少保留一列'); return; }
+              data.cols.splice(ci, 1);
+              (data.rows||[]).forEach(function(r){ r.splice(ci, 1); });
+              var newCP = {};
+              for (var k in (data.colPrompts||{})){
+                var ki = parseInt(k, 10);
+                if (ki < ci) newCP[ki] = data.colPrompts[ki];
+                else if (ki > ci) newCP[ki - 1] = data.colPrompts[ki];
+              }
+              data.colPrompts = newCP;
+              data.rev = (data.rev||0) + 1;
+              data.updated_at = Date.now();
+              meowTableMetaWrite(data, false);
+              if (typeof window.__meowSyncActiveBack === 'function') window.__meowSyncActiveBack(data);
+              refreshInlineTbl();
+              toast('已删除列「' + oldName + '」');
+            }
+          });
+          return;
+        }
 
         if (el.hasAttribute('data-ct-delrow')){
           var ri = parseInt(el.getAttribute('data-ct-delrow'),10);
@@ -6865,6 +6938,54 @@ window.__MEOW_SUM_CHAT_SWITCH__ = (newUID)=>{
       if (el.hasAttribute('data-ct-preview-row')){
         var previewBtn = bd.querySelector('#meow_tg_preview_hdr') || bd.querySelector('#meow_tg_preview');
         if (previewBtn) previewBtn.click();
+        return;
+      }
+
+      // 表头点击：编辑字段名 + 字段含义
+      if (el.hasAttribute('data-ct-hcol')){
+        const data = readCurrentData();
+        if (!data?.cols) return;
+        const ci = parseInt(el.getAttribute('data-ct-hcol'), 10);
+        if (!Number.isFinite(ci) || ci < 0 || ci >= data.cols.length) return;
+        const oldName = data.cols[ci] || '';
+        const oldPrompt = (data.colPrompts && data.colPrompts[ci]) || '';
+        meowCTCellPopup({
+          title: '编辑表头「' + oldName + '」',
+          fields: [
+            { label:'字段名', key:'name', value: oldName, type:'input' },
+            { label:'发送给 AI 的字段含义提示词', key:'prompt', value: oldPrompt, type:'textarea' }
+          ],
+          anchorEl: el,
+          onConfirm: function(vals){
+            const name = (vals.name || '').trim();
+            if (!name){ toast('请输入字段名'); return; }
+            data.cols[ci] = name;
+            if (!data.colPrompts) data.colPrompts = {};
+            data.colPrompts[ci] = (vals.prompt || '').trim();
+            data.rev = (data.rev||0) + 1;
+            data.updated_at = Date.now();
+            syncActiveBack(data);
+            refreshUI(data);
+          },
+          onDelete: function(){
+            if (data.cols.length <= 1){ toast('至少保留一列'); return; }
+            data.cols.splice(ci, 1);
+            (data.rows||[]).forEach(function(r){ r.splice(ci, 1); });
+            // 重建 colPrompts 索引
+            var newCP = {};
+            for (var k in (data.colPrompts||{})){
+              var ki = parseInt(k, 10);
+              if (ki < ci) newCP[ki] = data.colPrompts[ki];
+              else if (ki > ci) newCP[ki - 1] = data.colPrompts[ki];
+            }
+            data.colPrompts = newCP;
+            data.rev = (data.rev||0) + 1;
+            data.updated_at = Date.now();
+            syncActiveBack(data);
+            refreshUI(data);
+            toast('已删除列「' + oldName + '」');
+          }
+        });
         return;
       }
 
