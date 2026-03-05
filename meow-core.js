@@ -1139,7 +1139,7 @@ details[open] > summary .meow-pack-arrow{ transform:rotate(90deg); }
 /* 单元格编辑弹窗 */
 .meow-cell-popup-overlay{
   position:fixed;top:0;left:0;right:0;bottom:0;
-  background:transparent;z-index:100000;
+  background:transparent;z-index:99999;
   display:flex;align-items:center;justify-content:center;
   pointer-events:auto;
 }
@@ -3740,6 +3740,7 @@ function openAPISettingsPanel() {
 }
 
  function openSummaryModal(){
+  window.__MEOW_SUM_MODAL_OPEN_TS__ = Date.now(); // ★ 记录打开时间，用于抑制初始化 toast
   const bd = modalShell(ID_SUMMARY, '全自动总结', '🧠');
 
   // ★ 在标题栏 close 按钮左侧插入 API 按钮
@@ -5277,34 +5278,41 @@ function meowCTCellPopup(opts) {
   popup.innerHTML = h;
   overlay.appendChild(popup);
 
-  // ★ 插入到 body（不插入 modal 内部，避免触发 modal 滚动重置）
-  (doc.body || doc.documentElement).appendChild(overlay);
+  // ★ 插入到模态窗口内部（backdrop-filter 创建层叠上下文，必须在内部才可见）
+  var modalHost = doc.getElementById('meow-summary-modal') || doc.getElementById('meow-diary-modal') || doc.body;
 
-  // ★ 弹窗定位：如果有锚点元素，定位到其附近而非屏幕中心
+  // 先隐藏插入，避免触发重排导致滚动跳动
+  overlay.style.visibility = 'hidden';
+  modalHost.appendChild(overlay);
+
+  // ★ 弹窗定位：如果有锚点元素，用视口坐标定位到其附近
+  // 注意：modal 有 backdrop-filter，内部 fixed 等效 absolute，所以用视口坐标 - modal偏移
   if (opts.anchorEl) {
     overlay.style.alignItems = 'flex-start';
     overlay.style.justifyContent = 'flex-start';
-    setTimeout(function(){
-      try {
-        var rect = opts.anchorEl.getBoundingClientRect();
-        var popH = popup.offsetHeight || 200;
-        var popW = popup.offsetWidth || 300;
-        var winH = window.innerHeight || 600;
-        var winW = window.innerWidth || 400;
-        // 优先在锚点下方显示
-        var top = rect.bottom + 8;
-        // 如果下方空间不够，放到上方
-        if (top + popH > winH - 16) {
-          top = Math.max(16, rect.top - popH - 8);
-        }
-        var left = Math.max(8, Math.min(rect.left, winW - popW - 8));
-        popup.style.position = 'fixed';
-        popup.style.top = top + 'px';
-        popup.style.left = left + 'px';
-        popup.style.margin = '0';
-      } catch(e){}
-    }, 10);
+    try {
+      var rect = opts.anchorEl.getBoundingClientRect();
+      var modalRect = modalHost.getBoundingClientRect();
+      var popH = popup.offsetHeight || 200;
+      var popW = popup.offsetWidth || 300;
+      var winH = W.innerHeight || 600;
+      var winW = W.innerWidth || 400;
+      // 优先在锚点下方
+      var top = rect.bottom + 8;
+      if (top + popH > winH - 16) {
+        top = Math.max(16, rect.top - popH - 8);
+      }
+      var left = Math.max(8, Math.min(rect.left, winW - popW - 8));
+      // 转换为相对 modal 的坐标（backdrop-filter 让 fixed 变 absolute）
+      popup.style.position = 'fixed';
+      popup.style.top = top + 'px';
+      popup.style.left = left + 'px';
+      popup.style.margin = '0';
+    } catch(e){}
   }
+
+  // 显示
+  overlay.style.visibility = '';
 
   // Focus first input
   setTimeout(function(){
@@ -6603,7 +6611,8 @@ setTimeout(()=>{
     const book2 = doc.querySelector('#meow-summary-modal #meow_save_book');
     if (book2 && st?.bookName) book2.value = st.bookName;
 
-    toast(`已校正到当前聊天${st?.out ? '（有总结）' : '（暂无总结）'}`);
+    // ★ 静默校正，不弹 toast（这是打开弹窗时的初始化，不是用户主动切换聊天）
+    void(0)&&console.log('[MEOW] 初始 UID 校正:', __chatUID.slice(0,30), '→', freshUID.slice(0,30));
   }catch(e){}
 }, 800);
 
@@ -6709,7 +6718,10 @@ window.__MEOW_SUM_CHAT_SWITCH__ = (newUID)=>{
     if (promptEl && st?.prompt) promptEl.value = st.prompt;
 
     void(0)&&console.log('[MEOW][ChatSwitch] 切换总结到:', newUID.slice(0,30), st?.out ? '(有总结)' : '(暂无总结)');
-    toast(`已切换到该聊天${st?.out ? '（有总结）' : '（暂无总结）'}`);
+    // ★ 仅在弹窗已打开超过2秒时才弹 toast（避免初始化时刷屏）
+    if (window.__MEOW_SUM_MODAL_OPEN_TS__ && (Date.now() - window.__MEOW_SUM_MODAL_OPEN_TS__ > 2000)){
+      toast(`已切换到该聊天${st?.out ? '（有总结）' : '（暂无总结）'}`);
+    }
   }catch(e){}
 };
 
